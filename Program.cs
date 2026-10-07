@@ -5,7 +5,7 @@ using KafkaDemo.Data;
 using KafkaDemo.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
-using System.Text;
+using Microsoft.Extensions.Options;
 using OpenTelemetry.Metrics;
 using KafkaDemo.Repository;
 using KafkaDemo.Middleware;
@@ -19,7 +19,7 @@ builder.Services.AddCors(options =>
     options.AddPolicy("Frontend", policy =>
         policy.WithOrigins(
                 "http://localhost:5173",
-                "http://localhost:3000")
+                "http://localhost:8000")
             .AllowAnyHeader()
             .AllowAnyMethod());
 });
@@ -30,12 +30,16 @@ builder.Services
     {
         metrics.AddPrometheusExporter();
         metrics.AddMeter("System.Runtime");
+        metrics.AddMeter(NotificationMetrics.MeterName);
         metrics.AddMeter(
             "Microsoft.AspNetCore.Hosting",
             "Microsoft.AspNetCore.Server.Kestrel");
     });
 
-var jwtKey = "my-super-secret-key-1234567890AB";
+builder.Services.AddOptions<JwtOptions>()
+    .Bind(builder.Configuration.GetSection("Jwt"))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -45,9 +49,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateIssuer = false,
             ValidateAudience = false,
             ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(jwtKey))
+            ValidateIssuerSigningKey = true
         };
 
         options.Events = new JwtBearerEvents
@@ -112,6 +114,9 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
+builder.Services.AddSingleton<IPostConfigureOptions<JwtBearerOptions>,
+    JwtBearerOptionsPostConfigure>();
+
 builder.Services.AddHttpClient<PostApiClient>();
 builder.Services.AddScoped<UserRepository>();
 builder.Services.AddAuthorization();
@@ -119,6 +124,15 @@ builder.Services.AddAuthorization();
 builder.Services.AddScoped<ITransactionService, TransactionService>();
 builder.Services.AddControllers();
 builder.Services.AddScoped<ControllerAspect>();
+
+builder.Services.AddOptions<NotificationOptions>()
+    .Configure(options =>
+    {
+        builder.Configuration.GetSection("Kafka").Bind(options);
+        builder.Configuration.GetSection("Notification").Bind(options);
+    })
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 
 builder.Logging.AddConsole(options =>
 {
@@ -128,7 +142,11 @@ builder.Logging.AddConsole(options =>
 builder.Services.AddSingleton<KafkaProducerService>();
 builder.Services.AddSingleton<KafkaProducer>();
 builder.Services.AddSingleton<VaultService>();
+builder.Services.AddSingleton<NotificationMetrics>();
 builder.Services.AddSingleton<IWebSocketConnectionManager, WebSocketConnectionManager>();
+builder.Services.AddScoped<INotificationDispatcher, NotificationDispatcher>();
+builder.Services.AddHostedService<NotificationConsumerService>();
+builder.Services.AddHostedService<OutboxWorker>();
 builder.Services.AddScoped<PrivateMessageService>();
 
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -140,6 +158,8 @@ builder.Services.AddEndpointsApiExplorer();
 var app = builder.Build();
 
 app.UseHttpsRedirection();
+app.UseDefaultFiles();
+app.UseStaticFiles();
 app.UseRouting();
 app.UseCors("Frontend");
 app.UseAuthentication();

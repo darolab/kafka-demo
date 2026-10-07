@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#153a35">
+  <title>KafkaDemo | Live notifications</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172c29;
+      --muted: #637571;
+      --paper: #f3f6f2;
+      --surface: #ffffff;
+      --line: #d8e1dc;
+      --green: #126b5d;
+      --green-dark: #0d5147;
+      --green-soft: #e2f2ec;
+      --orange: #bc582e;
+      --orange-soft: #fff0e7;
+      --blue: #315da8;
+      --shadow: 0 18px 48px rgba(23, 44, 41, .08);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      background:
+        linear-gradient(135deg, rgba(18, 107, 93, .035) 25%, transparent 25%) 0 0 / 18px 18px,
+        var(--paper);
+      color: var(--ink);
+      font-family: "Aptos", "Segoe UI", sans-serif;
+    }
+
+    button, input, textarea { font: inherit; }
+
+    .topbar {
+      min-height: 66px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 0 max(24px, calc((100vw - 1120px) / 2));
+      color: #f5f8f5;
+      background: #153a35;
+      border-bottom: 3px solid #d47a43;
+    }
+
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-mark {
+      width: 31px;
+      height: 31px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(255,255,255,.45);
+      border-radius: 50%;
+      color: #e8b07e;
+      font-family: Georgia, serif;
+      font-size: 19px;
+    }
+    .brand-name { font-weight: 700; letter-spacing: .02em; }
+    .topbar-note { color: #bfd2cc; font-family: ui-monospace, monospace; font-size: 12px; }
+
+    main { max-width: 1120px; margin: 0 auto; padding: 38px 24px 54px; }
+    .intro { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 27px; }
+    .eyebrow { margin: 0 0 8px; color: var(--green); font: 700 11px ui-monospace, monospace; text-transform: uppercase; }
+    h1 { margin: 0; font: 400 clamp(30px, 5vw, 45px)/1.05 Georgia, serif; }
+    .intro-copy { max-width: 345px; margin: 0 0 3px; color: var(--muted); line-height: 1.5; font-size: 14px; }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(270px, .82fr) minmax(360px, 1.18fr);
+      overflow: hidden;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      box-shadow: var(--shadow);
+    }
+
+    .column { min-width: 0; padding: 25px 27px; }
+    .column + .column { border-left: 1px solid var(--line); }
+    .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 15px; border-bottom: 1px solid var(--line); }
+    h2 { margin: 0; font-size: 15px; font-weight: 700; }
+    .step { color: #8a9a95; font: 11px ui-monospace, monospace; }
+    .subsection { padding: 19px 0; border-bottom: 1px solid var(--line); }
+    .subsection:last-child { padding-bottom: 0; border-bottom: 0; }
+    h3 { margin: 0 0 13px; font-size: 12px; }
+    label { display: block; margin: 0 0 6px; color: #52635f; font-size: 11px; font-weight: 700; }
+    input, textarea {
+      width: 100%;
+      border: 1px solid #cad6d0;
+      border-radius: 4px;
+      padding: 10px 11px;
+      outline: none;
+      color: var(--ink);
+      background: #fff;
+      transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    input:focus, textarea:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(18,107,93,.12); }
+    input:disabled, textarea:disabled { background: #f4f6f4; color: #71807b; }
+    .field { margin-bottom: 12px; }
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 13px; }
+    button {
+      min-height: 37px;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      padding: 8px 13px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 700;
+      transition: background .15s ease, transform .15s ease, border-color .15s ease;
+    }
+    button:hover:not(:disabled) { transform: translateY(-1px); }
+    button:disabled { cursor: not-allowed; opacity: .48; }
+    .primary { color: #fff; background: var(--green); }
+    .primary:hover:not(:disabled) { background: var(--green-dark); }
+    .secondary { color: var(--ink); background: #fff; border-color: #cbd7d1; }
+    .secondary:hover:not(:disabled) { background: #f3f7f4; }
+    .danger { color: var(--orange); background: var(--orange-soft); border-color: #f0cdbb; }
+
+    .connection-line { display: flex; align-items: center; gap: 9px; margin: 4px 0 8px; }
+    .status-dot { width: 9px; height: 9px; border-radius: 50%; background: #899691; }
+    .status-dot.connected { background: #13956f; box-shadow: 0 0 0 4px rgba(19,149,111,.12); }
+    .status-dot.connecting { background: #d47a43; animation: blink 1s infinite alternate; }
+    .status-dot.error { background: #bd432e; }
+    @keyframes blink { to { opacity: .35; } }
+    .status-text { font-size: 13px; font-weight: 700; }
+    .session-note { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+
+    .right-column { display: flex; flex-direction: column; }
+    .compose { padding-bottom: 22px; border-bottom: 1px solid var(--line); }
+    textarea { min-height: 84px; resize: vertical; }
+    .counter { float: right; color: #80908a; font: 10px ui-monospace, monospace; }
+    .stream-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 18px 0 12px; }
+    .stream-head h3 { margin: 0; }
+    .stream { display: flex; flex-direction: column; gap: 8px; min-height: 230px; max-height: 360px; overflow: auto; }
+    .empty { display: grid; min-height: 190px; place-items: center; padding: 24px; border: 1px dashed #cad6d0; border-radius: 4px; color: #778680; text-align: center; font-size: 12px; line-height: 1.6; }
+    .event {
+      display: grid;
+      grid-template-columns: 6px minmax(0, 1fr) auto;
+      gap: 11px;
+      align-items: start;
+      padding: 11px 12px;
+      background: #f7f9f7;
+      border: 1px solid #e1e8e3;
+      border-radius: 4px;
+      animation: appear .22s ease-out;
+    }
+    @keyframes appear { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+    .event-mark { width: 5px; height: 100%; min-height: 27px; border-radius: 5px; background: var(--blue); }
+    .event.received .event-mark { background: var(--green); }
+    .event.error .event-mark { background: var(--orange); }
+    .event-title { margin: 0 0 4px; font-size: 11px; font-weight: 700; }
+    .event-detail { margin: 0; overflow-wrap: anywhere; color: var(--muted); font-size: 11px; line-height: 1.45; }
+    .event-time { color: #84918c; font: 10px ui-monospace, monospace; white-space: nowrap; }
+    .footer-note { margin: 19px 0 0; color: #687872; font-size: 11px; line-height: 1.55; }
+    code { padding: 1px 4px; border-radius: 3px; color: #26594f; background: #edf4ef; font: 10px ui-monospace, monospace; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+    @media (max-width: 760px) {
+      main { padding: 25px 15px 34px; }
+      .intro { align-items: start; flex-direction: column; gap: 12px; }
+      .intro-copy { max-width: 520px; }
+      .workspace { grid-template-columns: 1fr; }
+      .column { padding: 21px 19px; }
+      .column + .column { border-top: 1px solid var(--line); border-left: 0; }
+      .topbar { padding: 0 15px; }
+    }
+    @media (max-width: 430px) {
+      .topbar-note { display: none; }
+      .field-row { grid-template-columns: 1fr; gap: 0; }
+      .event { grid-template-columns: 5px minmax(0, 1fr); }
+      .event-time { grid-column: 2; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">K</span>
+      <span class="brand-name">KafkaDemo</span>
+    </div>
+    <span class="topbar-note">NOTIFICATION PLAYGROUND / LOCAL</span>
+  </header>
+
+  <main>
+    <div class="intro">
+      <div>
+        <p class="eyebrow">Realtime channel</p>
+        <h1>Private notifications</h1>
+      </div>
+      <p class="intro-copy">Authenticate, open a WebSocket, and send a message to another account. Keep a second tab open as the recipient.</p>
+    </div>
+
+    <div class="workspace">
+      <section class="column" aria-labelledby="sessionHeading">
+        <div class="section-heading">
+          <h2 id="sessionHeading">Session</h2>
+          <span class="step">01 / AUTH</span>
+        </div>
+
+        <form id="loginForm" class="subsection">
+          <h3>Sign in</h3>
+          <div class="field">
+            <label for="username">Username</label>
+            <input id="username" name="username" autocomplete="username" required maxlength="80" placeholder="admin or user2">
+          </div>
+          <div class="field">
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" required>
+          </div>
+          <div class="actions">
+            <button id="loginButton" class="primary" type="submit">Sign in</button>
+            <button id="clearSessionButton" class="secondary" type="button" disabled>Clear session</button>
+          </div>
+        </form>
+
+        <section class="subsection" aria-labelledby="connectionHeading">
+          <h3 id="connectionHeading">WebSocket connection</h3>
+          <div class="connection-line" role="status" aria-live="polite">
+            <span id="statusDot" class="status-dot" aria-hidden="true"></span>
+            <span id="connectionStatus" class="status-text">Not signed in</span>
+          </div>
+          <p id="sessionNote" class="session-note">Your JWT stays in this tab's memory and is sent only to the same-origin WebSocket endpoint.</p>
+          <div class="actions">
+            <button id="connectButton" class="primary" type="button" disabled>Connect</button>
+            <button id="disconnectButton" class="secondary" type="button" disabled>Disconnect</button>
+          </div>
+        </section>
+      </section>
+
+      <section class="column right-column" aria-labelledby="messageHeading">
+        <div class="section-heading">
+          <h2 id="messageHeading">Private message</h2>
+          <span class="step">02 / SEND</span>
+        </div>
+
+        <form id="messageForm" class="compose">
+          <div class="field-row">
+            <div class="field">
+              <label for="recipientId">Recipient user ID</label>
+              <input id="recipientId" name="recipientId" type="number" min="1" step="1" required placeholder="1002" disabled>
+            </div>
+            <div class="field">
+              <label for="messageText">Message <span id="messageCounter" class="counter">0 / 4000</span></label>
+              <textarea id="messageText" name="message" maxlength="4000" required placeholder="Write a private message..." disabled></textarea>
+            </div>
+          </div>
+          <div class="actions">
+            <button id="sendButton" class="primary" type="submit" disabled>Send message</button>
+          </div>
+        </form>
+
+        <div class="stream-head">
+          <h3>Live activity</h3>
+          <button id="clearLogButton" class="secondary" type="button">Clear log</button>
+        </div>
+        <div id="eventStream" class="stream" aria-live="polite" aria-relevant="additions">
+          <div id="emptyState" class="empty">Incoming notifications and connection events will appear here.</div>
+        </div>
+      </section>
+    </div>
+
+    <p class="footer-note">A successful send has no sender acknowledgement in the current API. Check the recipient tab for the event. Offline recipients are not replayed messages; subsequent notifications arrive after reconnect.</p>
+  </main>
+
+  <script>
+    "use strict";
+
+    const loginForm = document.querySelector("#loginForm");
+    const messageForm = document.querySelector("#messageForm");
+    const usernameInput = document.querySelector("#username");
+    const passwordInput = document.querySelector("#password");
+    const recipientInput = document.querySelector("#recipientId");
+    const messageInput = document.querySelector("#messageText");
+    const messageCounter = document.querySelector("#messageCounter");
+    const loginButton = document.querySelector("#loginButton");
+    const clearSessionButton = document.querySelector("#clearSessionButton");
+    const connectButton = document.querySelector("#connectButton");
+    const disconnectButton = document.querySelector("#disconnectButton");
+    const sendButton = document.querySelector("#sendButton");
+    const connectionStatus = document.querySelector("#connectionStatus");
+    const statusDot = document.querySelector("#statusDot");
+    const sessionNote = document.querySelector("#sessionNote");
+    const eventStream = document.querySelector("#eventStream");
+    const emptyState = document.querySelector("#emptyState");
+
+    let accessToken = null;
+    let socket = null;
+    let loggedInUser = null;
+
+    function setStatus(label, state) {
+      connectionStatus.textContent = label;
+      statusDot.className = `status-dot ${state || ""}`.trim();
+      const authenticated = Boolean(accessToken);
+      const connected = socket?.readyState === WebSocket.OPEN;
+      connectButton.disabled = !authenticated || connected;
+      disconnectButton.disabled = !connected;
+      clearSessionButton.disabled = !authenticated || socket?.readyState === WebSocket.OPEN;
+      recipientInput.disabled = !connected;
+      messageInput.disabled = !connected;
+      sendButton.disabled = !connected;
+      usernameInput.disabled = authenticated;
+      passwordInput.disabled = authenticated;
+      loginButton.disabled = authenticated;
+    }
+
+    function addEvent(title, detail, kind = "system") {
+      emptyState?.remove();
+      const entry = document.createElement("article");
+      entry.className = `event ${kind}`;
+      const mark = document.createElement("span");
+      mark.className = "event-mark";
+      mark.setAttribute("aria-hidden", "true");
+      const content = document.createElement("div");
+      const heading = document.createElement("p");
+      heading.className = "event-title";
+      heading.textContent = title;
+      const text = document.createElement("p");
+      text.className = "event-detail";
+      text.textContent = detail;
+      const time = document.createElement("time");
+      time.className = "event-time";
+      time.dateTime = new Date().toISOString();
+      time.textContent = new Date().toLocaleTimeString();
+      content.append(heading, text);
+      entry.append(mark, content, time);
+      eventStream.prepend(entry);
+      while (eventStream.children.length > 100)
+        eventStream.lastElementChild.remove();
+    }
+
+    async function readResponse(response) {
+      const text = await response.text();
+      if (!text)
+        return null;
+      try {
+        return JSON.parse(text);
+      } catch {
+        return text;
+      }
+    }
+
+    loginForm.addEventListener("submit", async event => {
+      event.preventDefault();
+      loginButton.disabled = true;
+      setStatus("Signing in...", "connecting");
+
+      try {
+        const response = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: usernameInput.value.trim(),
+            password: passwordInput.value
+          })
+        });
+        const body = await readResponse(response);
+        if (!response.ok || !body?.token)
+          throw new Error(typeof body === "string" ? body : `Login failed (${response.status}).`);
+
+        accessToken = body.token;
+        loggedInUser = usernameInput.value.trim();
+        passwordInput.value = "";
+        sessionNote.textContent = `Signed in as ${loggedInUser}. Token is held in memory only.`;
+        setStatus("Authenticated · not connected", "");
+        addEvent("Authenticated", `Session established for ${loggedInUser}.`, "received");
+      } catch (error) {
+        accessToken = null;
+        loggedInUser = null;
+        setStatus("Sign-in failed", "error");
+        sessionNote.textContent = error.message || "Could not reach the login endpoint.";
+        addEvent("Authentication failed", error.message || "Request failed.", "error");
+      }
+    });
+
+    connectButton.addEventListener("click", () => {
+      if (!accessToken)
+        return;
+      if (socket && socket.readyState !== WebSocket.CLOSED)
+        socket.close();
+
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const url = `${protocol}//${window.location.host}/api/WebSocket/connect?access_token=${encodeURIComponent(accessToken)}`;
+      setStatus("Connecting...", "connecting");
+      socket = new WebSocket(url);
+
+      socket.addEventListener("open", () => {
+        setStatus("Connected", "connected");
+        addEvent("WebSocket connected", `Live session opened for ${loggedInUser}.`, "received");
+      });
+
+      socket.addEventListener("message", event => {
+        let envelope;
+        try {
+          envelope = JSON.parse(event.data);
+        } catch {
+          addEvent("Unreadable notification", "Received a non-JSON WebSocket frame.", "error");
+          return;
+        }
+
+        const payload = envelope?.payload || {};
+        const sender = payload.senderId == null ? "unknown" : payload.senderId;
+        const body = payload.message || envelope?.eventType || "Notification received";
+        addEvent(
+          `Notification · ${envelope?.eventType || "unknown event"}`,
+          `From ${sender}: ${body} · id ${envelope?.notificationId || "missing"}`,
+          "received"
+        );
+      });
+
+      socket.addEventListener("error", () => {
+        addEvent("WebSocket error", "Check the API address, token, and server logs.", "error");
+      });
+
+      socket.addEventListener("close", event => {
+        setStatus(accessToken ? "Disconnected" : "Not signed in", event.wasClean ? "" : "error");
+        addEvent("WebSocket closed", `Code ${event.code}${event.reason ? ` · ${event.reason}` : ""}.`, event.wasClean ? "system" : "error");
+      });
+    });
+
+    disconnectButton.addEventListener("click", () => {
+      if (socket && socket.readyState < WebSocket.CLOSING)
+        socket.close(1000, "Closed by user");
+    });
+
+    clearSessionButton.addEventListener("click", () => {
+      if (socket && socket.readyState < WebSocket.CLOSING)
+        socket.close(1000, "Session cleared");
+      accessToken = null;
+      loggedInUser = null;
+      loginForm.reset();
+      sessionNote.textContent = "Your JWT stays in this tab's memory and is sent only to the same-origin WebSocket endpoint.";
+      setStatus("Not signed in", "");
+      addEvent("Session cleared", "Sign in again to reconnect.");
+    });
+
+    messageInput.addEventListener("input", () => {
+      messageCounter.textContent = `${messageInput.value.length} / 4000`;
+    });
+
+    messageForm.addEventListener("submit", event => {
+      event.preventDefault();
+      if (!socket || socket.readyState !== WebSocket.OPEN)
+        return;
+
+      const recipientId = Number(recipientInput.value);
+      const message = messageInput.value.trim();
+      if (!Number.isInteger(recipientId) || recipientId < 1) {
+        addEvent("Invalid recipient", "Enter a positive integer user ID.", "error");
+        return;
+      }
+      if (!message || message.length > 4000) {
+        addEvent("Invalid message", "Message must contain 1 to 4000 characters.", "error");
+        return;
+      }
+
+      socket.send(JSON.stringify({ recipientId: String(recipientId), message }));
+      addEvent("Message frame sent", `Recipient ${recipientId}. Check that user's connected tab for delivery.`, "system");
+      messageInput.value = "";
+      messageCounter.textContent = "0 / 4000";
+    });
+
+    document.querySelector("#clearLogButton").addEventListener("click", () => {
+      eventStream.replaceChildren();
+      eventStream.append(emptyState);
+      addEvent("Activity cleared", "New connection and notification events will appear here.");
+    });
+
+    setStatus("Not signed in", "");
+  </script>
+</body>
+</html>

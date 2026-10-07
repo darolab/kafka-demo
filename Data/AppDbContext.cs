@@ -15,6 +15,8 @@ public class AppDbContext : DbContext
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<NotificationDeliveryAudit> NotificationDeliveryAudits =>
+        Set<NotificationDeliveryAudit>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Transaction>(entity =>
@@ -60,8 +62,30 @@ public class AppDbContext : DbContext
                 .HasMaxLength(200)
                 .IsRequired();
 
+            entity.Property(x => x.MessageKey)
+                .HasMaxLength(200)
+                .IsRequired()
+                .HasDefaultValue(string.Empty);
+
+            entity.Property(x => x.LeaseOwner)
+                .HasMaxLength(100);
+
             entity.Property(x => x.Payload)
                 .IsRequired();
+
+            entity.HasIndex(x => new { x.PublishedAt, x.LeaseExpiresAtUtc, x.Id });
+        });
+
+        modelBuilder.Entity<NotificationDeliveryAudit>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.InstanceId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.CorrelationId).HasMaxLength(128).IsRequired();
+            entity.Property(x => x.EventType).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Result).HasMaxLength(30).IsRequired();
+            entity.Property(x => x.ErrorDetail).HasMaxLength(1000);
+            entity.HasIndex(x => new { x.NotificationId, x.InstanceId });
+            entity.HasIndex(x => new { x.UserId, x.CreatedAtUtc });
         });
     }
 

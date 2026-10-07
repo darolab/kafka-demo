@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Globalization;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace KafkaDemo.Controllers;
 
@@ -15,7 +16,9 @@ namespace KafkaDemo.Controllers;
 public class WebSocketController(
     IWebSocketConnectionManager connections,
     PrivateMessageService messages,
-    ILogger<WebSocketController> logger) : ControllerBase
+    ILogger<WebSocketController> logger,
+    IOptions<NotificationOptions> notificationOptions,
+    NotificationMetrics metrics) : ControllerBase
 {
     private sealed record IncomingMessage(string RecipientId, string Message);
 
@@ -60,7 +63,11 @@ public class WebSocketController(
         }
 
         using var socket = await HttpContext.WebSockets.AcceptWebSocketAsync();
-        var connectionId = connections.AddConnection(userId, socket);
+        var connectionId = connections.AddConnection(
+            userId,
+            socket,
+            notificationOptions.Value.InstanceId);
+        metrics.RecordConnectionOpened();
         var buffer = new byte[4096];
 
         try
@@ -133,9 +140,17 @@ public class WebSocketController(
         {
             // Connection ended unexpectedly.
         }
+        catch (IOException exception)
+        {
+            logger.LogDebug(
+                exception,
+                "WebSocket transport closed for user {UserId}",
+                userId);
+        }
         finally
         {
             connections.RemoveConnection(userId, connectionId);
+            metrics.RecordConnectionClosed();
         }
     }
 }

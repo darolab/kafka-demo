@@ -1,23 +1,42 @@
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
+using Microsoft.Extensions.Options;
 
 namespace KafkaDemo.Services;
 
 public sealed class WebSocketConnectionManager : IWebSocketConnectionManager
 {
-    private sealed class Connection(WebSocket socket)
+    private sealed class Connection(
+        int userId,
+        string instanceId,
+        WebSocket socket)
     {
         public Guid Id { get; } = Guid.NewGuid();
+        public int UserId { get; } = userId;
+        public string InstanceId { get; } = instanceId;
+        public DateTimeOffset ConnectedAtUtc { get; } = DateTimeOffset.UtcNow;
+        public DateTimeOffset LastSeenAtUtc { get; set; } = DateTimeOffset.UtcNow;
+        public string Status { get; set; } = "open";
         public WebSocket Socket { get; } = socket;
         public SemaphoreSlim SendLock { get; } = new(1, 1);
     }
 
     private readonly ConcurrentDictionary<int,
         ConcurrentDictionary<Guid, Connection>> _connections = new();
+    private readonly TimeSpan _sendTimeout;
 
-    public Guid AddConnection(int userId, WebSocket socket)
+    public WebSocketConnectionManager(IOptions<NotificationOptions>? options = null)
     {
-        var connection = new Connection(socket);
+        _sendTimeout = TimeSpan.FromSeconds(
+            options?.Value.SocketSendTimeoutSeconds ?? 5);
+    }
+
+    public Guid AddConnection(
+        int userId,
+        WebSocket socket,
+        string instanceId = "unknown")
+    {
+        var connection = new Connection(userId, instanceId, socket);
         var userConnections = _connections.GetOrAdd(
             userId, _ => new ConcurrentDictionary<Guid, Connection>());
 
@@ -28,7 +47,16 @@ public sealed class WebSocketConnectionManager : IWebSocketConnectionManager
     public void RemoveConnection(int userId, Guid connectionId)
     {
         if (_connections.TryGetValue(userId, out var userConnections))
+        {
             userConnections.TryRemove(connectionId, out _);
+            if (userConnections.IsEmpty)
+            {
+                ((ICollection<KeyValuePair<int,
+                    ConcurrentDictionary<Guid, Connection>>>)_connections)
+                    .Remove(new KeyValuePair<int,
+                        ConcurrentDictionary<Guid, Connection>>(userId, userConnections));
+            }
+        }
     }
 
     public bool IsOnline(int userId) =>
@@ -48,29 +76,52 @@ public sealed class WebSocketConnectionManager : IWebSocketConnectionManager
         foreach (var connection in userConnections.Values)
         {
             if (connection.Socket.State != WebSocketState.Open)
+            {
+                RemoveConnection(userId, connection.Id);
                 continue;
+            }
 
-            await connection.SendLock.WaitAsync(cancellationToken);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken);
+            timeout.CancelAfter(_sendTimeout);
+            var lockAcquired = false;
             try
             {
+                await connection.SendLock.WaitAsync(timeout.Token);
+                lockAcquired = true;
+
                 if (connection.Socket.State != WebSocketState.Open)
+                {
+                    RemoveConnection(userId, connection.Id);
                     continue;
+                }
 
                 await connection.Socket.SendAsync(
                     new ArraySegment<byte>(payload),
                     WebSocketMessageType.Text,
                     endOfMessage: true,
-                    cancellationToken);
+                    timeout.Token);
 
+                connection.LastSeenAtUtc = DateTimeOffset.UtcNow;
                 sent = true;
             }
             catch (WebSocketException)
             {
-                // The receiving connection will be removed when it disconnects.
+                connection.Status = "stale";
+                connection.Socket.Abort();
+                RemoveConnection(userId, connection.Id);
+            }
+            catch (OperationCanceledException) when (
+                timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                connection.Status = "stale";
+                connection.Socket.Abort();
+                RemoveConnection(userId, connection.Id);
             }
             finally
             {
-                connection.SendLock.Release();
+                if (lockAcquired)
+                    connection.SendLock.Release();
             }
         }
 

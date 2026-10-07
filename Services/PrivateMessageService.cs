@@ -1,13 +1,15 @@
 using System.Text.Json;
 using KafkaDemo.Data;
+using KafkaDemo.DTO;
 using KafkaDemo.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace KafkaDemo.Services;
 
 public sealed class PrivateMessageService(
     AppDbContext context,
-    IWebSocketConnectionManager connections)
+    IOptions<NotificationOptions> options)
 {
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web);
@@ -18,40 +20,68 @@ public sealed class PrivateMessageService(
         string text,
         CancellationToken cancellationToken)
     {
-        var recipientExists = await context.Users
-            .AnyAsync(user => user.Id == recipientId, cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(
+            cancellationToken);
 
-        if (!recipientExists)
-            throw new KeyNotFoundException("Recipient not found.");
-
-        var message = new ChatMessage
+        try
         {
-            SenderId = senderId,
-            RecipientId = recipientId,
-            Message = text,
-            SentAt = DateTime.UtcNow,
-            Status = "Pending"
-        };
+            var recipientExists = await context.Users
+                .AnyAsync(user => user.Id == recipientId, cancellationToken);
 
-        context.ChatMessages.Add(message);
-        await context.SaveChangesAsync(cancellationToken);
+            if (!recipientExists)
+                throw new KeyNotFoundException("Recipient not found.");
 
-        var outgoing = new
-        {
-            senderId = senderId.ToString(),
-            recipientId = recipientId.ToString(),
-            message = text,
-            timestamp = message.SentAt
-        };
+            var now = DateTimeOffset.UtcNow;
+            var message = new ChatMessage
+            {
+                SenderId = senderId,
+                RecipientId = recipientId,
+                Message = text,
+                SentAt = now.UtcDateTime,
+                Status = "Pending"
+            };
 
-        var payload = JsonSerializer.SerializeToUtf8Bytes(outgoing, JsonOptions);
-
-        if (await connections.SendToUserAsync(
-                recipientId, payload, cancellationToken))
-        {
-            message.Status = "Sent";
-            message.DeliveredAt = DateTime.UtcNow;
+            context.ChatMessages.Add(message);
             await context.SaveChangesAsync(cancellationToken);
+
+            var payload = JsonSerializer.SerializeToElement(
+                new
+                {
+                    senderId,
+                    recipientId,
+                    chatMessageId = message.Id,
+                    message = text,
+                    timestampUtc = now
+                },
+                JsonOptions);
+
+            var envelope = new NotificationEnvelope(
+                1,
+                Guid.NewGuid(),
+                recipientId,
+                "chat.message.created",
+                System.Diagnostics.Activity.Current?.TraceId.ToString()
+                    ?? Guid.NewGuid().ToString("N"),
+                now,
+                payload);
+
+            context.OutboxMessages.Add(new OutboxMessage
+            {
+                EventType = envelope.EventType,
+                Topic = options.Value.NotificationTopic,
+                MessageKey = recipientId.ToString(),
+                Payload = JsonSerializer.Serialize(envelope, JsonOptions),
+                CreatedAt = now.UtcDateTime
+            });
+
+            await context.SaveChangesAsync(cancellationToken);
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            throw;
         }
     }
 }

@@ -1,7 +1,7 @@
 <!--
 Sync Impact Report
 - Version change: 0.0.0 -> 1.0.0
-- Modified principles: [PRINCIPLE_1_NAME] -> I. Secure-by-Default Design; [PRINCIPLE_2_NAME] -> II. Contract-First Integration; [PRINCIPLE_3_NAME] -> III. Test-First Delivery; [PRINCIPLE_4_NAME] -> IV. Observable, Recoverable Operations; [PRINCIPLE_5_NAME] -> V. Simplicity and Maintainability
+- Modified principles: Core Principles template -> I. Secure-by-Default Design; II. Contract-First Integration; III. Test-First Delivery; IV. Observable, Recoverable Operations; V. Simplicity and Maintainability
 - Added sections: Security & Compliance; Development Workflow
 - Removed sections: none
 - Deferred items: TODO(RATIFICATION_DATE): confirm the original project adoption date
