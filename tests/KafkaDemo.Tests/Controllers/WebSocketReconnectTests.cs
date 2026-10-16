@@ -1,41 +1,20 @@
-using System.IdentityModel.Tokens.Jwt;
 using System.Net.WebSockets;
-using System.Security.Claims;
-using System.Text;
-using KafkaDemo;
 using KafkaDemo.Services;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.AspNetCore.TestHost;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
-using Microsoft.IdentityModel.Tokens;
 using Xunit;
 
 namespace KafkaDemo.Tests.Controllers;
 
 public sealed class WebSocketReconnectTests
 {
-    private const string JwtKey = "test-only-notification-signing-key-32-bytes";
-
     [Fact]
     public async Task ReconnectedUserReceivesANewLiveSessionAfterDisconnect()
     {
-        using var factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder =>
-            {
-                builder.ConfigureAppConfiguration((_, configuration) =>
-                    configuration.AddInMemoryCollection(new Dictionary<string, string?>
-                    {
-                        ["Jwt:SigningKey"] = JwtKey
-                    }));
-                builder.ConfigureTestServices(services =>
-                    services.RemoveAll<IHostedService>());
-            });
+        await using var factory = new AuthenticationTestFactory();
+        await factory.InitializeDatabaseAsync();
+        await factory.SeedUserAsync(42, "websocket-reconnect-user", ["User"]);
         var manager = factory.Services.GetRequiredService<IWebSocketConnectionManager>();
-        var token = CreateToken();
+        var token = factory.CreateToken(userId: 42, roles: ["User"]);
         var uri = new Uri(
             $"ws://localhost/api/WebSocket/connect?access_token={Uri.EscapeDataString(token)}");
 
@@ -67,15 +46,4 @@ public sealed class WebSocketReconnectTests
             await Task.Delay(20, timeout.Token);
     }
 
-    private static string CreateToken()
-    {
-        var token = new JwtSecurityToken(
-            claims: [new Claim("userId", "42")],
-            expires: DateTime.UtcNow.AddMinutes(2),
-            signingCredentials: new SigningCredentials(
-                new SymmetricSecurityKey(Encoding.UTF8.GetBytes(JwtKey)),
-                SecurityAlgorithms.HmacSha256));
-
-        return new JwtSecurityTokenHandler().WriteToken(token);
-    }
 }

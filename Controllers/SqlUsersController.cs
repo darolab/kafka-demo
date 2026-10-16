@@ -2,10 +2,12 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using System.Data;
+using Microsoft.AspNetCore.Authorization;
 
 namespace KafkaDemo.Controllers
 {
     [ApiController]
+    [Authorize(Policy = "AdminOnly")]
     [Route("api/sql-users")]
     public class SqlUsersController : ControllerBase
     {
@@ -29,7 +31,7 @@ namespace KafkaDemo.Controllers
                 connection.Open();
 
                 using (var command = new SqlCommand(
-                    "SELECT * FROM Users",
+                    "SELECT Id, Name, Email, Age, CreatedAt FROM Users",
                     connection))
                 {
                     using (var reader = command.ExecuteReader())

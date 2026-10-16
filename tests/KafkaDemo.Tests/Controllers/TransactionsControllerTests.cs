@@ -27,7 +27,9 @@ public sealed class TransactionsControllerTests
                 builder.ConfigureAppConfiguration((_, configuration) =>
                     configuration.AddInMemoryCollection(new Dictionary<string, string?>
                     {
-                        ["Jwt:SigningKey"] = "test-only-notification-signing-key-32-bytes"
+                        ["Jwt:SigningKey"] = "test-only-notification-signing-key-32-bytes",
+                        ["Jwt:Issuer"] = "KafkaDemo.Tests",
+                        ["Jwt:Audience"] = "KafkaDemo.Tests.Client"
                     }));
                 builder.ConfigureTestServices(services =>
                 {

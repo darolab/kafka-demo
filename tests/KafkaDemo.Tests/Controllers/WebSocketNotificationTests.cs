@@ -1,29 +1,16 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Json;
-using System.Security.Claims;
-using System.Text;
 using System.Text.Json;
-using KafkaDemo;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.AspNetCore.TestHost;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
-using Microsoft.IdentityModel.Tokens;
 using Xunit;
 
 namespace KafkaDemo.Tests.Controllers;
 
 public sealed class WebSocketNotificationTests
 {
-    private const string JwtKey = "test-only-notification-signing-key-32-bytes";
-
     [Fact]
     public async Task ServesNotificationPlaygroundAtApplicationRoot()
     {
-        using var factory = CreateFactory();
+        await using var factory = await CreateFactoryAsync();
         using var client = factory.CreateClient();
 
         var response = await client.GetAsync("/");
@@ -38,7 +25,7 @@ public sealed class WebSocketNotificationTests
     [Fact]
     public async Task RejectsConnectionWithoutJwt()
     {
-        using var factory = CreateFactory();
+        await using var factory = await CreateFactoryAsync();
         using var client = factory.CreateClient();
 
         var response = await client.GetAsync("/api/WebSocket/connect");
@@ -49,22 +36,22 @@ public sealed class WebSocketNotificationTests
     [Fact]
     public async Task RejectsAuthenticatedTokenWithoutUserIdentity()
     {
-        using var factory = CreateFactory();
+        await using var factory = await CreateFactoryAsync();
         using var client = factory.CreateClient();
-        var token = CreateToken(new Claim(ClaimTypes.Name, "authenticated"));
+        var token = factory.CreateToken(roles: ["User"]);
 
         var response = await client.GetAsync(
             $"/api/WebSocket/connect?access_token={Uri.EscapeDataString(token)}");
 
-        Assert.Equal(System.Net.HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]
     public async Task AuthenticatedUserReachesWebSocketUpgradeRequirement()
     {
-        using var factory = CreateFactory();
+        await using var factory = await CreateFactoryAsync();
         using var client = factory.CreateClient();
-        var token = CreateToken(new Claim("userId", "42"));
+        var token = factory.CreateToken(userId: 42, roles: ["User"]);
 
         var response = await client.GetAsync(
             $"/api/WebSocket/connect?access_token={Uri.EscapeDataString(token)}");
@@ -75,12 +62,23 @@ public sealed class WebSocketNotificationTests
     [Fact]
     public async Task LoginTokenUsesSameConfiguredKeyAsWebSocketValidation()
     {
-        using var factory = CreateFactory();
+        await using var factory = new AuthenticationTestFactory();
+        await factory.InitializeDatabaseAsync();
         using var client = factory.CreateClient();
+        var registerResponse = await client.PostAsJsonAsync(
+            "/api/auth/register",
+            new
+            {
+                username = "user2",
+                email = "user2@example.test",
+                fullName = "Test User",
+                password = "correct-horse-battery-staple"
+            });
+        registerResponse.EnsureSuccessStatusCode();
 
         var loginResponse = await client.PostAsJsonAsync(
             "/api/auth/login",
-            new { username = "user2", password = "123456" });
+            new { username = "user2", password = "correct-horse-battery-staple" });
         loginResponse.EnsureSuccessStatusCode();
         using var login = JsonDocument.Parse(await loginResponse.Content.ReadAsStringAsync());
         var token = login.RootElement.GetProperty("token").GetString();
@@ -91,27 +89,11 @@ public sealed class WebSocketNotificationTests
         Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    private static WebApplicationFactory<Program> CreateFactory() =>
-        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
-        {
-            builder.ConfigureAppConfiguration((_, configuration) =>
-                configuration.AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["Jwt:SigningKey"] = JwtKey
-                }));
-            builder.ConfigureTestServices(services =>
-                services.RemoveAll<IHostedService>());
-        });
-
-    private static string CreateToken(params Claim[] claims)
+    private static async Task<AuthenticationTestFactory> CreateFactoryAsync()
     {
-        var token = new JwtSecurityToken(
-            claims: claims,
-            expires: DateTime.UtcNow.AddMinutes(2),
-            signingCredentials: new SigningCredentials(
-                new SymmetricSecurityKey(Encoding.UTF8.GetBytes(JwtKey)),
-                SecurityAlgorithms.HmacSha256));
-
-        return new JwtSecurityTokenHandler().WriteToken(token);
+        var factory = new AuthenticationTestFactory();
+        await factory.InitializeDatabaseAsync();
+        await factory.SeedUserAsync(42, "websocket-user", ["User"]);
+        return factory;
     }
 }

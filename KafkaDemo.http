@@ -4,3 +4,12 @@ GET {{KafkaDemo_HostAddress}}/weatherforecast/
 Accept: application/json
 
 ###
+
+@accessToken = paste-token-here
+
+### Get the authenticated user's details
+GET {{KafkaDemo_HostAddress}}/api/user/getUserDetail
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###

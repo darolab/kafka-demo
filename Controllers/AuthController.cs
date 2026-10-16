@@ -1,71 +1,99 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.Tokens;
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
+using KafkaDemo.DTO;
+using KafkaDemo.Repository;
 using KafkaDemo.Services;
-using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 [ApiController]
 [Route("api/auth")]
-public class AuthController : ControllerBase
+public sealed class AuthController(
+    AuthenticationService authenticationService,
+    ILogger<AuthController> logger) : ControllerBase
 {
-    private readonly JwtOptions _jwtOptions;
 
-    public AuthController(IOptions<JwtOptions> jwtOptions)
+    
+    [HttpPost("register")]
+    public async Task<IActionResult> Register(
+        RegistrationRequestDTO request,
+        CancellationToken cancellationToken)
     {
-        _jwtOptions = jwtOptions.Value;
+        try
+        {
+            var user = await authenticationService.RegisterAsync(request, cancellationToken);
+            logger.LogInformation("User registration succeeded.");
+            return StatusCode(StatusCodes.Status201Created, user);
+        }
+        catch (AuthenticationConflictException)
+        {
+            logger.LogWarning("User registration failed because the account conflicts with existing account data.");
+            return Conflict(new ProblemDetails
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "An account with that username or email already exists."
+            });
+        }
     }
 
     [HttpPost("login")]
-    public IActionResult Login(LoginRequest request)
+    public async Task<IActionResult> Login(
+        LoginRequestDTO request,
+        CancellationToken cancellationToken)
     {
-        int userId;
-        string role;
-
-        // Demo accounts only. Replace with database-backed user validation.
-        if (request.Username == "admin" && request.Password == "123456")
+        var result = await authenticationService.LoginAsync(request, cancellationToken);
+        if (result is null)
         {
-            userId = 1001;
-            role = "Admin";
-        }
-        else if (request.Username == "user2" && request.Password == "123456")
-        {
-            userId = 1002;
-            role = "User";
-        }
-        else
-        {
+            logger.LogWarning("User login failed because the supplied credentials were invalid.");
             return Unauthorized("Invalid username or password");
         }
 
-        var claims = new[]
-        {
-            new Claim("userId", userId.ToString()),
-            new Claim(ClaimTypes.Name, request.Username),
-            new Claim(ClaimTypes.Role, role)
-        };
-
-        var key = new SymmetricSecurityKey(
-            Encoding.UTF8.GetBytes(_jwtOptions.SigningKey));
-
-        var credentials = new SigningCredentials(
-            key,
-            SecurityAlgorithms.HmacSha256);
-
-        var token = new JwtSecurityToken(
-            claims: claims,
-            expires: DateTime.UtcNow.AddHours(1),
-            signingCredentials: credentials);
-
-        var tokenString = new JwtSecurityTokenHandler().WriteToken(token);
-
-        return Ok(new { token = tokenString });
+        logger.LogInformation("User login succeeded.");
+        return Ok(result);
     }
-}
 
-public class LoginRequest
-{
-    public string Username { get; set; } = "";
-    public string Password { get; set; } = "";
+    [HttpPost("bootstrap")]
+    public async Task<IActionResult> Bootstrap(
+        BootstrapRequestDTO request,
+        [FromHeader(Name = "X-Authentication-Bootstrap")] string? bootstrapSecret,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var user = await authenticationService.BootstrapAdminAsync(
+                request,
+                bootstrapSecret,
+                cancellationToken);
+            logger.LogInformation("Administrator bootstrap succeeded.");
+            return StatusCode(StatusCodes.Status201Created, user);
+        }
+        catch (BootstrapNotConfiguredException)
+        {
+            logger.LogWarning("Administrator bootstrap failed because bootstrap is not configured.");
+            return Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "Administrator bootstrap is not configured.");
+        }
+        catch (BootstrapSecretException)
+        {
+            logger.LogWarning("Administrator bootstrap failed because the supplied bootstrap credentials were invalid.");
+            return Unauthorized("Invalid bootstrap credentials.");
+        }
+        catch (AuthenticationBootstrapConflictException)
+        {
+            logger.LogWarning("Administrator bootstrap failed because bootstrap has already been completed.");
+            return Conflict(new ProblemDetails
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "Administrator bootstrap is already complete."
+            });
+        }
+        catch (AuthenticationConflictException)
+        {
+            logger.LogWarning("Administrator bootstrap failed because the account conflicts with existing account data.");
+            return Conflict(new ProblemDetails
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "The account conflicts with existing account data."
+            });
+        }
+    }
 }

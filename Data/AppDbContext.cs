@@ -1,7 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using KafkaDemo.Models;
-using System.Data;
-
 namespace KafkaDemo.Data;
 
 public class AppDbContext : DbContext
@@ -12,6 +10,10 @@ public class AppDbContext : DbContext
     }
 
     public DbSet<User> Users { get; set; }
+    public DbSet<Role> Roles => Set<Role>();
+    public DbSet<UserRole> UserRoles => Set<UserRole>();
+    public DbSet<AuthenticationBootstrapState> AuthenticationBootstrapStates =>
+        Set<AuthenticationBootstrapState>();
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
@@ -19,6 +21,63 @@ public class AppDbContext : DbContext
         Set<NotificationDeliveryAudit>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<User>(entity =>
+        {
+            entity.Property(user => user.NormalizedEmail)
+                .HasMaxLength(320)
+                .IsRequired();
+            entity.Property(user => user.Username)
+                .HasMaxLength(64);
+            entity.Property(user => user.NormalizedUsername)
+                .HasMaxLength(64);
+            entity.Property(user => user.PasswordHash)
+                .HasMaxLength(512);
+            entity.Property(user => user.IsEnabled)
+                .HasDefaultValue(false);
+            entity.Property(user => user.FailedLoginCount)
+                .HasDefaultValue(0);
+            entity.HasIndex(user => user.NormalizedEmail)
+                .IsUnique();
+            entity.HasIndex(user => user.NormalizedUsername)
+                .IsUnique()
+                .HasFilter("[NormalizedUsername] IS NOT NULL");
+        });
+
+        modelBuilder.Entity<Role>(entity =>
+        {
+            entity.HasKey(role => role.Id);
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_Roles_Name_Supported",
+                "[Name] IN ('Admin', 'User')"));
+            entity.Property(role => role.Name)
+                .HasMaxLength(32)
+                .IsRequired();
+            entity.HasIndex(role => role.Name)
+                .IsUnique();
+            entity.HasData(
+                new Role { Id = 1, Name = "User" },
+                new Role { Id = 2, Name = "Admin" });
+        });
+
+        modelBuilder.Entity<UserRole>(entity =>
+        {
+            entity.HasKey(userRole => new { userRole.UserId, userRole.RoleId });
+            entity.HasOne(userRole => userRole.User)
+                .WithMany(user => user.UserRoles)
+                .HasForeignKey(userRole => userRole.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(userRole => userRole.Role)
+                .WithMany(role => role.UserRoles)
+                .HasForeignKey(userRole => userRole.RoleId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<AuthenticationBootstrapState>(entity =>
+        {
+            entity.HasKey(state => state.Id);
+            entity.HasData(new AuthenticationBootstrapState { Id = 1 });
+        });
+
         modelBuilder.Entity<Transaction>(entity =>
         {
             entity.HasKey(x => x.Id);
